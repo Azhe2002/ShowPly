@@ -23,7 +23,9 @@ Shader "PointCloud/UnlitVertexColor"
 
             HLSLPROGRAM
             #pragma vertex vert
+            #pragma geometry geom
             #pragma fragment frag
+            #pragma target 4.0
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
@@ -36,7 +38,6 @@ Shader "PointCloud/UnlitVertexColor"
             {
                 float4 positionHCS : SV_POSITION;
                 float  depth        : TEXCOORD0;
-                float  psize        : PSIZE;
             };
 
             CBUFFER_START(UnityPerMaterial)
@@ -49,11 +50,28 @@ Shader "PointCloud/UnlitVertexColor"
             {
                 Varyings OUT;
                 OUT.positionHCS = TransformObjectToHClip(IN.positionOS.xyz);
-                OUT.psize = _PointSize;
                 float range = max(_DepthMax - _DepthMin, 0.001);
                 // near(z=min)=white, far(z=max)=black
                 OUT.depth = 1.0 - saturate((IN.positionOS.z - _DepthMin) / range);
                 return OUT;
+            }
+
+            // D3D11 ignores variable PSIZE. Expand each point in screen space
+            // so point size also works in the Windows standalone player.
+            [maxvertexcount(4)]
+            void geom(point Varyings input[1], inout TriangleStream<Varyings> stream)
+            {
+                float2 halfSize = _PointSize / _ScreenParams.xy;
+                const float2 corners[4] = {
+                    float2(-1, -1), float2(-1, 1), float2(1, -1), float2(1, 1)
+                };
+                for (int i = 0; i < 4; i++)
+                {
+                    Varyings output = input[0];
+                    output.positionHCS.xy += corners[i] * halfSize * output.positionHCS.w;
+                    stream.Append(output);
+                }
+                stream.RestartStrip();
             }
 
             float4 frag(Varyings IN) : SV_Target
